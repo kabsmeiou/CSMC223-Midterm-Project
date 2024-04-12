@@ -174,13 +174,15 @@ string parse (string instruction) {
             break;
         }
     }
-    int jump_index = -1;
-    string jump_size = "";;
     if (instruction_index == -1) {
         cerr << "Compilation error: You have entered an invalid operation." << '\n';
         return "";
     } 
     //have to parse branching differently because of an extra argument which is the size of the jump
+    int jump_index = -1;
+    string jump_size = "";
+    int jump_value = -1;
+    bool negative_jump = false;
     if (operation_code[0] == 'J') {
         jump_index = 1;
         int count = 0;
@@ -190,22 +192,29 @@ string parse (string instruction) {
             jump_size += instruction[i];
             length += 1;
         }
+        if (jump_size.back() == '-') {
+            negative_jump = true;
+            jump_size.pop_back();
+        } 
         reverse(jump_size.begin(), jump_size.end());
         while (length > 0) {
             instruction.pop_back();
             length -= 1;
         }
+        jump_value = stoi(jump_size);
     }
 
     operation_code = decimal_to_binary(instruction_index, 2);
-
+    //cout << operation_code << '\n';
     //get register/variable from input and parse to its corresponding code according to the defined ISA
     string expression = "";
+    
     current_index += 1;
     for (current_index; current_index < instruction.size(); current_index += 1) {
         if (instruction[current_index] == ',') break;
         expression += instruction[current_index];
     }
+    //cout << expression << '\n';
     int register_index = -1;
     for (int i = 0; i < registers.size(); i += 1) {
         if (registers[i] == expression) {
@@ -213,7 +222,7 @@ string parse (string instruction) {
             break;
         }
     }
-
+    
     if (register_index == -1) {
         mem_size -= 1;      //subtract from the memory size to make space for a variable
         memory.allocate_variable(expression);
@@ -222,7 +231,6 @@ string parse (string instruction) {
     } else {
         expression = decimal_to_binary(register_index + 1, 2);
     }
-    
     //get the data and convert it to binary to store it to memory
     string data = (operation_code == "1010" ? "0" : "");
     current_index += 2;
@@ -240,7 +248,11 @@ string parse (string instruction) {
                 break;
             }
         }
-        string parsed_instruction = "2" + operation_code + expression + decimal_to_binary(index, 1) + (jump_index != -1 ? " " + decimal_to_binary(stoi(jump_size) - 1, 1) : ""); 
+        string parsed_instruction = "2" + operation_code + expression + decimal_to_binary(index, 1); 
+        if (jump_index != -1) {
+            string jump_data = (is_negative ? "1" : "0") + decimal_to_binary(stoi(jump_size) - (negative_jump ? -1 : 1), 1);
+            parsed_instruction += " " + jump_data;
+        }
         return parsed_instruction;
     } else if (register_check(data)) {
         int index = 0;
@@ -250,12 +262,20 @@ string parse (string instruction) {
                 break;
             }
         }
-        string parsed_instruction = "3" + operation_code + expression + decimal_to_binary(index + 1, 1) + (jump_index != -1 ? " " + decimal_to_binary(stoi(jump_size) - 1, 1) : "");  
+        string parsed_instruction = "3" + operation_code + expression + decimal_to_binary(index + 1, 1);  
+        if (jump_index != -1) {
+            string jump_data = (negative_jump ? "1" : "0") + decimal_to_binary(stoi(jump_size) - (negative_jump ? -1 : 1), 1);
+            parsed_instruction += " " + jump_data;
+        }
         return parsed_instruction;
     }
     int value = stoi(data);
     data = decimal_to_binary(value, 1);
-    string parsed_instruction = (is_negative ? "1" : "0") + operation_code + expression + data + (jump_index != -1 ? " " + decimal_to_binary(stoi(jump_size) - 1, 1) : ""); 
+    string parsed_instruction = (is_negative ? "1" : "0") + operation_code + expression + data; 
+    if (jump_index != -1) {
+        string jump_data = (negative_jump ? "1" : "0") + decimal_to_binary(stoi(jump_size) - (negative_jump ? -1 : 1), 1);
+        parsed_instruction += " " + jump_data;
+    }
     return parsed_instruction;
 }
 
@@ -281,10 +301,10 @@ void execute_instruction (string operation_code, string expression, string data)
     //place the data temporarily on a cpu register
     int value = IRX[0] - '0';
     if (value == 0 || value == 1) {
-        //cout << data << '\n';
         general_purpose_registers["RR7"] = binary_to_decimal(data) * (IRX[0] == '1' ? -1 : 1);   
     } else if (value == 2) {
         string raw_data = memory.get_variable_data(variable_names[binary_to_decimal(data)]);
+        //cout << raw_data << '\n';
         general_purpose_registers["RR7"] = (raw_data[0] == '1' ? -1 : 1) * binary_to_decimal(raw_data.substr(1, 16)); 
     } else if (value == 3) {
         general_purpose_registers["RR7"] = (main_registers[registers[binary_to_decimal(data) - 1]]) * (IRX[0] == '1' ? -1 : 1);   
@@ -359,7 +379,7 @@ void execute_instruction (string operation_code, string expression, string data)
         main_registers["PCX"] += (main_registers[REG] != general_purpose_registers["RR7"] ? general_purpose_registers["RR3"] : 0);
 
     } else if (operation_code == "1010") {
-
+        //cout << "reg" << register_code << '\n';
         string REG = registers[register_code];
         cout << main_registers[REG] << '\n';
 
@@ -379,12 +399,12 @@ void decode_instruction () {
     }
     if (IRX.size() > 25) {
         string jump_size = "";
-        for (int i = 25; i < IRX.size(); i += 1) {
+        for (int i = 27; i < IRX.size(); i += 1) {
             jump_size += IRX[i];
         }
-        general_purpose_registers["RR3"] = binary_to_decimal(jump_size);
-        //cout << jump_size << '\n';
+        general_purpose_registers["RR3"] = (IRX[26] == '1' ? -1 : 1) * binary_to_decimal(jump_size);
     }
+    //cout << operation_code << ' ' << expression << ' ' << data << '\n';
     execute_instruction(operation_code, expression, data);
 }
 
@@ -418,7 +438,9 @@ signed main() {
     bool invalid_argument = false;
 
     for (auto line : temporary_holder) {
+        //cout << line << '\n';
         string data = parse(line);      //convert human readable instructions to binary
+
         if (data == "") {
             invalid_argument = true;
             break;
@@ -429,7 +451,6 @@ signed main() {
     if (invalid_argument) {
         return 0;
     }
-
     // for (int i = n; i < general_purpose_registers["RR1"]; i += 1) {
     //     cout << memory.get_data(parse_address_raw(i)) << '\n';;
     // }
